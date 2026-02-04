@@ -6,7 +6,6 @@ from mcp.server.fastmcp import FastMCP
 
 from pdf_transcriber.config import Config
 from pdf_transcriber.tools import transcribe, lint
-from pdf_transcriber.resources import paper_resources
 
 # Configure logging to stderr (CRITICAL: stdout is reserved for JSON-RPC)
 logging.basicConfig(
@@ -40,11 +39,6 @@ def main():
             "Tools registered: transcribe_pdf, clear_transcription_cache, "
             "lint_paper, generate_lint_report, get_lint_rules"
         )
-
-        # Register resources
-        logger.info("Registering resources...")
-        paper_resources.register(mcp, config)
-        logger.info("Resources registered: papers://index, papers://metadata/{name}")
 
         # Run the server
         logger.info("Starting MCP server on stdio...")
