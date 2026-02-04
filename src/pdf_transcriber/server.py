@@ -35,10 +35,7 @@ def main():
         logger.info("Registering tools...")
         transcribe.register(mcp, config)
         lint.register(mcp, config)
-        logger.info(
-            "Tools registered: transcribe_pdf, clear_transcription_cache, "
-            "lint_paper, generate_lint_report, get_lint_rules"
-        )
+        logger.info("Tools registered: transcribe_pdf, clear_transcription_cache, lint_paper")
 
         # Run the server
         logger.info("Starting MCP server on stdio...")

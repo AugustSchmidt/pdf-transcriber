@@ -264,8 +264,6 @@ def check_command():
     print("  - transcribe_pdf")
     print("  - clear_transcription_cache")
     print("  - lint_paper")
-    print("  - generate_lint_report")
-    print("  - get_lint_rules")
 
     print("\n" + "=" * 40)
     print("Ready to transcribe!")

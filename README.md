@@ -42,6 +42,9 @@ pdf-transcriber-cli transcribe ~/Downloads/paper.pdf -q high-quality
 # Disable LLM (faster, less accurate)
 pdf-transcriber-cli transcribe ~/Downloads/paper.pdf --no-llm
 
+# Skip automatic linting
+pdf-transcriber-cli transcribe ~/Downloads/paper.pdf --no-lint
+
 # Health check
 pdf-transcriber-cli check
 ```
@@ -170,8 +173,6 @@ When running as an MCP server, these tools are available:
 | `transcribe_pdf` | Convert PDF to Markdown |
 | `clear_transcription_cache` | Free ~2GB memory from cached OCR models |
 | `lint_paper` | Fix common OCR artifacts |
-| `generate_lint_report` | Create markdown report of lint issues |
-| `get_lint_rules` | List available lint rules |
 
 ## MCP Server vs CLI + Skill: When to Use What
 
@@ -179,56 +180,15 @@ When running as an MCP server, these tools are available:
 
 | Approach | Context Overhead | Best For |
 |----------|------------------|----------|
-| **MCP Server** | ~2,100 tokens (5 tools + resources) | Frequent transcription, linting workflows |
+| **MCP Server** | ~1,200 tokens (3 tools) | Frequent transcription, linting workflows |
 | **CLI + Skill** | ~200 tokens (skill definition only) | Occasional use, context-constrained sessions |
 | **CLI only** | 0 tokens | Automation, CI pipelines |
 
-### Pros and Cons
-
-#### MCP Server
-
-**Pros:**
-- Tools always available without manual invocation
-- Rich integration (resources, tool chaining)
-- Automatic paper registry and metadata management
-- Claude can search/list papers without leaving conversation
-
-**Cons:**
-- ~3,000 tokens of context per session (tool definitions)
-- Requires MCP server configuration
-- Server must be running in background
-
-#### CLI + Skill
-
-**Pros:**
-- Minimal context usage (~200 tokens when skill invoked)
-- Simpler setup (just install skill)
-- Works without MCP infrastructure
-- Good for users who transcribe occasionally
-
-**Cons:**
-- Must explicitly invoke `/transcribe`
-- No automatic tool availability
-- Can't chain with other MCP tools
-
-#### CLI Only
-
-**Pros:**
-- Zero context overhead
-- Works in any terminal
-- Best for automation/scripting
-- No Claude Code dependency
-
-**Cons:**
-- No Claude integration
-- Manual workflow only
-
 ### Recommendation
 
-- **Research workflows** (frequent transcription, paper management): Use **MCP Server**
-- **Occasional transcription**: Use **CLI + Skill**
-- **CI/CD pipelines**: Use **CLI only**
-- **Context-limited sessions**: Start with **CLI + Skill**, switch to MCP if needed
+- **Frequent transcription**: Use **MCP Server** — tools always available
+- **Occasional transcription**: Use **CLI + Skill** — minimal context overhead
+- **CI/CD pipelines**: Use **CLI only** — zero Claude dependency
 
 ## Quality Presets
 
@@ -240,15 +200,108 @@ When running as an MCP server, these tools are available:
 
 ## Linting
 
-Transcriptions are automatically linted to fix common OCR artifacts:
+Transcriptions are automatically linted after transcription to fix common OCR artifacts. The original (pre-lint) version is saved as `{name}.original.md`.
 
-- **Page numbers**: Removes standalone numbers
-- **Orphaned labels**: Removes orphaned LaTeX labels
-- **Blank lines**: Normalizes excessive whitespace
-- **Hyphenation**: Rejoins words split across lines
-- **Math cleanup**: Fixes Unicode→LaTeX in math blocks
+### Available Lint Rules
 
-The original (pre-lint) version is saved as `{name}.original.md`.
+#### Markdown Structure Rules
+
+| Rule | Auto-Fix | Description |
+|------|----------|-------------|
+| `excessive_blank_lines` | ✅ | Reduces >2 consecutive blank lines |
+| `trailing_whitespace` | ✅ | Removes spaces/tabs at end of lines |
+| `leading_whitespace` | ✅ | Fixes inconsistent leading whitespace |
+| `header_whitespace` | ✅ | Normalizes spacing around headers |
+| `sparse_table_row` | ⚠️ | Warns about table rows >50% empty cells |
+| `orphaned_list_marker` | ⚠️ | Warns about list markers with no content |
+
+#### PDF Artifact Rules
+
+| Rule | Auto-Fix | Description |
+|------|----------|-------------|
+| `page_number` | ✅ | Removes standalone page numbers like "42" |
+| `page_marker` | ✅ | Removes page break markers |
+| `orphaned_label` | ✅ | Removes orphaned LaTeX labels like `def:Tilt` |
+| `hyphenation_artifact` | ✅ | Rejoins words split across lines (`hy-\nphenated`) |
+| `html_artifacts` | ✅ | Converts HTML tags to markdown equivalents |
+| `html_math_notation` | ✅ | Converts `<sup>2</sup>` to `$^2$` in math context |
+| `footnote_spacing` | ✅ | Fixes spacing around footnote markers |
+| `malformed_footnote` | ⚠️ | Warns about malformed footnote references |
+| `garbled_text` | ⚠️ | Warns about corrupted/nonsense text fragments |
+| `repeated_line` | ⚠️ | Warns about likely running headers/footers |
+
+#### Math Notation Rules
+
+| Rule | Auto-Fix | Description |
+|------|----------|-------------|
+| `unicode_math_symbols` | ✅ | Converts Unicode math (α, →, ∈) to LaTeX (`\alpha`, `\to`, `\in`) |
+| `unwrapped_math_expressions` | ✅ | Wraps bare math expressions in `$...$` |
+| `broken_math_delimiters` | ✅ | Fixes unbalanced `$` delimiters |
+| `space_in_math_variable` | ✅ | Removes spaces in variable names (`x _1` → `x_1`) |
+| `display_math_whitespace` | ✅ | Normalizes whitespace around `$$...$$` blocks |
+| `repetition_hallucination` | ⚠️ | Warns about repeated sequences (OCR hallucination) |
+
+### Running Specific Rules
+
+To run only specific lint rules (via MCP or programmatically):
+
+```python
+# Run only math-related rules
+lint_paper(paper_path, rules=["unicode_math_symbols", "broken_math_delimiters"])
+
+# Run only whitespace cleanup
+lint_paper(paper_path, rules=["excessive_blank_lines", "trailing_whitespace"])
+
+# Preview issues without fixing
+lint_paper(paper_path, fix=False)
+```
+
+### Customizing for Your Workflow
+
+If you're seeing specific patterns in your PDFs, you can run targeted lint passes:
+
+**For math-heavy papers:**
+```python
+lint_paper(path, rules=[
+    "unicode_math_symbols",
+    "unwrapped_math_expressions",
+    "broken_math_delimiters",
+    "space_in_math_variable"
+])
+```
+
+**For scanned books with page numbers:**
+```python
+lint_paper(path, rules=[
+    "page_number",
+    "page_marker",
+    "repeated_line",  # catches running headers
+    "hyphenation_artifact"
+])
+```
+
+**For cleaning up whitespace only:**
+```python
+lint_paper(path, rules=[
+    "excessive_blank_lines",
+    "trailing_whitespace",
+    "display_math_whitespace"
+])
+```
+
+### Disabling Automatic Linting
+
+To skip linting during transcription:
+
+```bash
+# CLI
+pdf-transcriber-cli transcribe paper.pdf --no-lint
+
+# MCP tool
+transcribe_pdf(pdf_path, lint=False)
+```
+
+You can then run linting manually later with custom rules.
 
 ## License
 
