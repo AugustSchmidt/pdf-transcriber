@@ -1,0 +1,82 @@
+[project]
+name = "pdf-transcriber"
+version = "1.0.0"
+description = "Convert math-heavy PDFs to Markdown using Marker OCR with optional LLM enhancement"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Gus Schmidt" }
+]
+keywords = [
+    "pdf", "markdown", "ocr", "transcription", "marker",
+    "mcp", "claude", "math", "latex", "academic"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Text Processing :: Markup :: Markdown",
+    "Topic :: Utilities",
+]
+
+dependencies = [
+    "mcp>=1.2.0",
+    "pymupdf>=1.24.0",
+    "pyyaml>=6.0",
+    "marker-pdf>=1.10.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/gusschmidt/pdf-transcriber"
+Documentation = "https://github.com/gusschmidt/pdf-transcriber#readme"
+Repository = "https://github.com/gusschmidt/pdf-transcriber"
+Issues = "https://github.com/gusschmidt/pdf-transcriber/issues"
+
+[project.scripts]
+pdf-transcriber = "pdf_transcriber.server:main"
+pdf-transcriber-cli = "pdf_transcriber.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdf_transcriber"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/pdf_transcriber/**/*.py",
+    "src/pdf_transcriber/skills/*.md",
+    "LICENSE",
+    "README.md",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
