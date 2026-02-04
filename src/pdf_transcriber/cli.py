@@ -46,9 +46,6 @@ def main():
         help="Don't resume from previous progress"
     )
 
-    # list command
-    subparsers.add_parser("list", help="List transcribed papers")
-
     # check command
     subparsers.add_parser("check", help="Health check (config, paths, Ollama)")
 
@@ -63,8 +60,6 @@ def main():
 
     if args.command == "transcribe":
         asyncio.run(transcribe_command(args))
-    elif args.command == "list":
-        list_command()
     elif args.command == "check":
         check_command()
     elif args.command == "install-skill":
@@ -206,51 +201,6 @@ async def transcribe_command(args):
     print(f"\nOutput: {output_path}")
 
 
-def list_command():
-    """Execute the list command."""
-    config = Config.load()
-
-    if not config.output_dir.exists():
-        print("No transcriptions found.")
-        print(f"Output directory: {config.output_dir}")
-        return
-
-    from pdf_transcriber.core.metadata_parser import extract_metadata_from_file
-
-    papers = []
-    for paper_dir in config.output_dir.iterdir():
-        if not paper_dir.is_dir():
-            continue
-
-        for file_path in paper_dir.glob("*.md"):
-            if file_path.stem.endswith(".original"):
-                continue
-
-            try:
-                metadata = extract_metadata_from_file(file_path)
-                if metadata:
-                    papers.append({
-                        "title": metadata.title,
-                        "path": str(file_path),
-                        "pages": metadata.total_pages,
-                        "transcribed_at": metadata.transcribed_at
-                    })
-            except Exception:
-                pass
-
-    if not papers:
-        print("No transcriptions found.")
-        print(f"Output directory: {config.output_dir}")
-        return
-
-    print(f"Found {len(papers)} transcription(s):\n")
-
-    for p in sorted(papers, key=lambda x: x["title"].lower()):
-        pages = f"({p['pages']} pages)" if p['pages'] else ""
-        print(f"  {p['title']} {pages}")
-        print(f"    {p['path']}")
-
-
 def check_command():
     """Execute the check command."""
     print(f"PDF Transcriber v{__version__}")
@@ -296,26 +246,24 @@ def check_command():
                 models = [m["name"] for m in data.get("models", [])]
 
                 if config.ollama_model in models:
-                    print(f"  Status: connected")
+                    print("  Status: connected")
                     print(f"  Model: {config.ollama_model} (available)")
                 else:
-                    print(f"  Status: connected")
+                    print("  Status: connected")
                     print(f"  Model: {config.ollama_model} (NOT INSTALLED)")
                     print(f"  Run: ollama pull {config.ollama_model}")
 
         except Exception as e:
-            print(f"  Status: NOT CONNECTED")
+            print("  Status: NOT CONNECTED")
             print(f"  Error: {e}")
             print(f"  URL: {config.ollama_base_url}")
             print("  Run: ollama serve")
 
     # Available tools
-    print("\nAvailable MCP tools:")
+    print("\nMCP tools:")
     print("  - transcribe_pdf")
     print("  - clear_transcription_cache")
     print("  - update_paper_metadata")
-    print("  - search_papers")
-    print("  - list_papers")
     print("  - lint_paper")
     print("  - get_lint_rules")
 

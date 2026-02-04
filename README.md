@@ -42,9 +42,6 @@ pdf-transcriber-cli transcribe ~/Downloads/paper.pdf -q high-quality
 # Disable LLM (faster, less accurate)
 pdf-transcriber-cli transcribe ~/Downloads/paper.pdf --no-llm
 
-# List all transcribed papers
-pdf-transcriber-cli list
-
 # Health check
 pdf-transcriber-cli check
 ```
@@ -161,7 +158,6 @@ All settings can be configured via environment variables:
 | Command | Description |
 |---------|-------------|
 | `transcribe <pdf>` | Transcribe a PDF to Markdown |
-| `list` | List all transcribed papers |
 | `check` | Health check (config, paths, Ollama) |
 | `install-skill` | Install Claude Code `/transcribe` skill |
 
@@ -174,8 +170,6 @@ When running as an MCP server, these tools are available:
 | `transcribe_pdf` | Convert PDF to Markdown |
 | `clear_transcription_cache` | Free ~2GB memory from cached OCR models |
 | `update_paper_metadata` | Update paper title, authors, keywords |
-| `search_papers` | Search transcribed papers by content/metadata |
-| `list_papers` | List all transcriptions with filtering |
 | `lint_paper` | Fix common OCR artifacts |
 | `get_lint_rules` | List available lint rules |
 
