@@ -114,7 +114,6 @@ PDF_TRANSCRIBER_USE_LLM=false
 | `qwen2.5vl:3b` | 3.2 GB | 8 GB | Good | Fast | **Default** - laptops, CI |
 | `qwen2.5vl:7b` | 5.5 GB | 16 GB | Better | Medium | Workstations |
 | `qwen3-vl:4b` | 3.5 GB | 10 GB | Best (newest) | Medium | Best quality/size |
-| `llava:13b` | 8 GB | 24 GB | Good | Slow | NVIDIA GPUs |
 
 **Important**: Only **vision models** (VLMs) work. Text-only models like `llama3` won't process images.
 
@@ -190,7 +189,7 @@ When running as an MCP server, these tools are available:
 
 - **Frequent transcription**: Use **MCP Server** — tools always available
 - **Occasional transcription**: Use **CLI + Skill** — minimal context overhead
-- **CI/CD pipelines**: Use **CLI only** — zero Claude dependency
+- **CI/CD pipelines**: Use **CLI only** — zero agent orchestrator dependency
 
 ## Quality Presets
 
@@ -290,6 +289,57 @@ lint_paper(path, rules=[
     "display_math_whitespace"
 ])
 ```
+
+### Adding Custom Lint Rules
+
+If you're seeing specific patterns in your PDFs that aren't caught by existing rules, you can add custom rules.
+
+Rules are generator functions that take the file content and yield `LintIssue` objects:
+
+```python
+# my_rules.py
+import re
+from pdf_transcriber.core.linter.models import LintIssue, Severity, Fix
+
+def my_custom_rule(content: str):
+    """
+    Detect and fix a specific pattern in your PDFs.
+
+    Rules are generators that yield LintIssue objects.
+    """
+    pattern = re.compile(r'PATTERN_TO_MATCH')
+
+    for match in pattern.finditer(content):
+        line_num = content[:match.start()].count('\n') + 1
+
+        yield LintIssue(
+            rule="my_custom_rule",
+            severity=Severity.AUTO_FIX,  # or WARNING for manual review
+            line=line_num,
+            message="Description of the issue",
+            fix=Fix(
+                old=match.group(),
+                new="replacement text"
+            )
+        )
+```
+
+To register your rule, add it to `rules/__init__.py`:
+
+```python
+# In RULES dict:
+"my_custom_rule": my_module.my_custom_rule,
+
+# If auto-fixable, add to DEFAULT_AUTO_FIX:
+DEFAULT_AUTO_FIX.add("my_custom_rule")
+```
+
+**Severity levels:**
+| Level | Use Case |
+|-------|----------|
+| `Severity.AUTO_FIX` | Safe to fix automatically (provide a `Fix`) |
+| `Severity.WARNING` | Needs human review |
+| `Severity.ERROR` | Must be addressed before use |
 
 ### Disabling Automatic Linting
 
