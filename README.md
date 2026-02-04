@@ -61,6 +61,8 @@ pdf-transcriber-cli install-skill
 
 ### 3. MCP Server (Claude Code Integration)
 
+> **Note**: This is a standard [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. While examples show Claude Code configuration, it works with any MCP-compatible agent orchestrator (Cursor, Cline, custom agents, etc.).
+
 Add to `~/.claude/settings.json`:
 
 ```json
