@@ -147,7 +147,7 @@ All settings can be configured via environment variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PDF_TRANSCRIBER_OUTPUT_DIR` | Where transcriptions are saved | `~/Documents/pdf-transcriptions` |
+| `PDF_TRANSCRIBER_OUTPUT_DIR` | Where transcriptions are saved | `./transcriptions` |
 | `PDF_TRANSCRIBER_QUALITY` | fast, balanced, high-quality | `balanced` |
 | `PDF_TRANSCRIBER_USE_GPU` | Enable GPU acceleration | Auto-detected |
 | `PDF_TRANSCRIBER_USE_LLM` | Enable LLM-enhanced OCR | `true` |

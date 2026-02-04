@@ -92,7 +92,6 @@ async def transcribe_command(args):
         generate_frontmatter
     )
     from pdf_transcriber.core.linter import engine as lint_engine
-    from pdf_transcriber.core.slugs import generate_paper_slug
 
     # Determine output location
     paper_name = pdf_path.stem
@@ -169,9 +168,6 @@ async def transcribe_command(args):
         quality=args.quality,
     )
 
-    paper_slug = generate_paper_slug(paper_name, [], None)
-    paper_meta.paper_slug = paper_slug
-
     summary = state_mgr.get_progress_summary()
     paper_meta.transcribed_pages = summary["completed"]
 
@@ -213,11 +209,6 @@ def check_command():
     print(f"  Default quality: {config.default_quality} ({config.get_dpi()}dpi)")
     print(f"  GPU: {config.use_gpu}")
     print(f"  LLM enhanced: {config.use_llm}")
-
-    if config.paper_registry_path:
-        print(f"  Paper registry: {config.paper_registry_path}")
-    else:
-        print("  Paper registry: (disabled)")
 
     # Output directory
     print("\nOutput directory:")

@@ -11,11 +11,6 @@ from pdf_transcriber.core.metadata_parser import (
     generate_frontmatter
 )
 from pdf_transcriber.core.linter import engine as lint_engine
-from pdf_transcriber.core.slugs import (
-    PaperRegistry,
-    generate_paper_slug,
-    get_or_create_paper_slug,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +40,7 @@ def register(mcp, config: Config):
             pdf_path: Path to the PDF file to transcribe
             quality: Quality preset - "fast" (100 DPI), "balanced" (150 DPI, default), or "high-quality" (200 DPI)
             mode: Processing mode - "streaming" (page-by-page, default) or "batch" (concurrent)
-            output_dir: Override default output directory (default: ~/Documents/pdf-transcriptions)
+            output_dir: Override default output directory (default: ./transcriptions)
             resume: If True, resume from previous progress if available (default: True)
             metadata: Optional metadata dict with fields: title, authors (list), year (int), journal, arxiv_id, doi, keywords (list)
             lint: If True (default), run linting with auto-fix after transcription. Original saved as {name}.original.md
@@ -234,50 +229,6 @@ def register(mcp, config: Config):
             keywords=meta_dict.get("keywords", [])
         )
 
-        # Generate paper slug (registry is optional)
-        paper_slug = None
-        if config.paper_registry_path and config.paper_registry_path.exists():
-            try:
-                registry = PaperRegistry(config.paper_registry_path)
-                registry.load()
-
-                paper_slug, is_new = get_or_create_paper_slug(
-                    registry=registry,
-                    title=paper_title,
-                    authors=paper_authors,
-                    year=paper_year,
-                    paper_type=meta_dict.get("type", "article"),
-                )
-
-                # Update registry with transcription path
-                transcription_rel_path = f"Transcriptions/{paper_name}/"
-                if is_new:
-                    registry.register(
-                        slug=paper_slug,
-                        title=paper_title,
-                        authors=paper_authors,
-                        year=paper_year,
-                        paper_type=meta_dict.get("type", "article"),
-                        transcription_path=transcription_rel_path,
-                        pdf_path=str(pdf_path) if pdf_path else None,
-                    )
-                else:
-                    registry.update_path(paper_slug, "transcription", transcription_rel_path)
-
-                registry.save()
-                logger.info(f"Paper slug: {paper_slug} (new={is_new})")
-
-            except Exception as e:
-                logger.warning(f"Failed to update paper registry: {e}")
-                paper_slug = generate_paper_slug(paper_title, paper_authors, paper_year)
-        else:
-            # No registry configured - just generate a slug for metadata
-            paper_slug = generate_paper_slug(paper_title, paper_authors, paper_year)
-            logger.debug("Paper registry not configured, using generated slug")
-
-        # Add paper_slug to metadata
-        paper_meta.paper_slug = paper_slug
-
         # Update transcribed_pages count
         summary = state_mgr.get_progress_summary()
         paper_meta.transcribed_pages = summary["completed"]
@@ -341,13 +292,11 @@ def register(mcp, config: Config):
         return {
             "success": True,
             "output_path": str(output_path),
-            "paper_slug": paper_slug,
             "pages_transcribed": summary["completed"],
             "total_pages": summary["total"],
             "partial_content": None,
             "error": None,
             "metadata": {
-                "paper_slug": paper_slug,
                 "title": paper_meta.title,
                 "authors": paper_meta.authors,
                 "keywords": paper_meta.keywords,

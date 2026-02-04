@@ -8,14 +8,11 @@ import os
 class Config:
     """Configuration for PDF transcriber MCP server."""
 
-    # Output directory (no vault concept - generic path)
+    # Output directory (relative to current working directory)
     output_dir: Path = field(
-        default_factory=lambda: Path.home() / "Documents/pdf-transcriptions"
+        default_factory=lambda: Path.cwd() / "transcriptions"
     )
 
-    # Paper registry path (optional - disabled by default for generic use)
-    # Set via PDF_TRANSCRIBER_PAPER_REGISTRY_PATH env var if needed
-    paper_registry_path: Path | None = None
 
     # Quality presets (DPI values)
     quality_presets: dict = field(default_factory=lambda: {
@@ -68,9 +65,6 @@ class Config:
         if val := os.environ.get("PDF_TRANSCRIBER_OUTPUT_DIR"):
             config.output_dir = Path(val).expanduser()
 
-        # Override paper registry path from env (optional - disabled by default)
-        if val := os.environ.get("PDF_TRANSCRIBER_PAPER_REGISTRY_PATH"):
-            config.paper_registry_path = Path(val).expanduser()
 
         # Override quality preset from env
         if val := os.environ.get("PDF_TRANSCRIBER_QUALITY"):
