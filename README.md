@@ -2,6 +2,14 @@
 
 Convert math-heavy PDFs to Markdown using Marker OCR with optional LLM enhancement.
 
+## Stability & Support
+
+- **Status**: Stable for personal use
+- **Breaking changes**: Announced in CHANGELOG
+- **Issue response**: Best effort, typically within 1 week
+- **Dependencies**: Updated as needed for security and compatibility
+- **MCP Protocol**: Compatible with MCP SDK >=1.2.0
+
 ## Installation
 
 ### Recommended (isolated environment)
