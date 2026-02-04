@@ -171,6 +171,7 @@ When running as an MCP server, these tools are available:
 | `clear_transcription_cache` | Free ~2GB memory from cached OCR models |
 | `update_paper_metadata` | Update paper title, authors, keywords |
 | `lint_paper` | Fix common OCR artifacts |
+| `generate_lint_report` | Create markdown report of lint issues |
 | `get_lint_rules` | List available lint rules |
 
 ## MCP Server vs CLI + Skill: When to Use What
@@ -179,7 +180,7 @@ When running as an MCP server, these tools are available:
 
 | Approach | Context Overhead | Best For |
 |----------|------------------|----------|
-| **MCP Server** | ~3,000 tokens (tool schemas + resources) | Frequent transcription, multi-step workflows |
+| **MCP Server** | ~1,500 tokens (tool schemas + resources) | Frequent transcription, metadata workflows |
 | **CLI + Skill** | ~200 tokens (skill definition only) | Occasional use, context-constrained sessions |
 | **CLI only** | 0 tokens | Automation, CI pipelines |
 

@@ -39,7 +39,7 @@ def main():
         lint.register(mcp, config)
         logger.info(
             "Tools registered: transcribe_pdf, clear_transcription_cache, "
-            "update_paper_metadata, lint_paper, get_lint_rules"
+            "update_paper_metadata, lint_paper, generate_lint_report, get_lint_rules"
         )
 
         # Register resources
