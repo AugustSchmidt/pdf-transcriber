@@ -361,4 +361,4 @@ MIT
 
 ## Contributing
 
-Issues and PRs welcome at https://github.com/gusschmidt/pdf-transcriber
+Issues and PRs welcome at https://github.com/AugustSchmidt/pdf-transcriber

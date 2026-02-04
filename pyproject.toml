@@ -44,10 +44,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/gusschmidt/pdf-transcriber"
-Documentation = "https://github.com/gusschmidt/pdf-transcriber#readme"
-Repository = "https://github.com/gusschmidt/pdf-transcriber"
-Issues = "https://github.com/gusschmidt/pdf-transcriber/issues"
+Homepage = "https://github.com/AugustSchmidt/pdf-transcriber"
+Documentation = "https://github.com/AugustSchmidt/pdf-transcriber#readme"
+Repository = "https://github.com/AugustSchmidt/pdf-transcriber"
+Issues = "https://github.com/AugustSchmidt/pdf-transcriber/issues"
 
 [project.scripts]
 pdf-transcriber = "pdf_transcriber.server:main"
