@@ -1,4 +1,4 @@
 """PDF Transcriber MCP tools."""
-from . import transcribe, metadata, lint
+from . import transcribe, lint
 
-__all__ = ["transcribe", "metadata", "lint"]
+__all__ = ["transcribe", "lint"]

@@ -263,7 +263,6 @@ def check_command():
     print("\nMCP tools:")
     print("  - transcribe_pdf")
     print("  - clear_transcription_cache")
-    print("  - update_paper_metadata")
     print("  - lint_paper")
     print("  - generate_lint_report")
     print("  - get_lint_rules")
