@@ -631,3 +631,174 @@ def display_math_whitespace(content: str) -> Generator[LintIssue, None, None]:
                 message=f"Extra blank line(s) after display math",
                 fix=Fix(old=match.group(), new=f'{math_end}\n')
             )
+
+
+def merge_math_expressions(content: str) -> Generator[LintIssue, None, None]:
+    """
+    Merge fragmented mathematical expressions into unified math mode blocks.
+
+    Detects patterns like:
+    - S = **C**[ϵ]/(ϵ 2 ) → $S = \\mathbb{C}[\\epsilon]/(\\epsilon^2)$
+    - K ◦ → K → $K^\\circ \\to K$
+    - Variable assignments with math symbols
+
+    This rule runs AFTER individual symbol rules to merge their output into
+    cohesive expressions. Fixes common spacing issues like "ϵ 2" → "\\epsilon^2".
+    """
+    # Pattern: Equation-like expressions with = and math symbols
+    # Captures: [variable] = [expression with bold/**/, unicode, brackets, operators]
+    equation_pattern = re.compile(
+        r'\b([A-Za-z][A-Za-z0-9_]*)\s*=\s*'  # Variable =
+        r'((?:'
+        r'\*\*[A-Z]\*\*|'          # Bold letters like **C**
+        r'[A-Za-z0-9_\[\]\(\)/\+\-\*◦∗∞×÷±⊗⊕]|'  # Math chars
+        r'[α-ωΑ-Ω]|'               # Greek letters
+        r'[ϵεℓ]|'                   # Special math symbols
+        r'\s'                       # Spaces
+        r')+)',
+        re.UNICODE
+    )
+
+    for match in equation_pattern.finditer(content):
+        # Skip if already fully in math mode
+        if is_in_math_mode(content, match.start()):
+            continue
+
+        var = match.group(1)
+        expr = match.group(2).strip()
+        line_num = content[:match.start()].count('\n') + 1
+
+        # Process the expression to fix common issues
+        fixed_expr = expr
+
+        # Fix bold number sets: **C** → \mathbb{C}
+        for letter in ['C', 'Z', 'R', 'Q', 'N', 'A', 'P', 'F', 'H', 'G']:
+            fixed_expr = re.sub(
+                rf'\*\*\s*{letter}\s*\*\*',
+                rf'\\mathbb{{{letter}}}',
+                fixed_expr
+            )
+
+        # Fix Unicode to LaTeX
+        for unicode_char, latex_cmd in UNICODE_TO_LATEX.items():
+            fixed_expr = fixed_expr.replace(unicode_char, latex_cmd)
+
+        # Fix spacing in superscripts: "ε 2" → "ε^2", "ϵ 2" → "\epsilon^2"
+        fixed_expr = re.sub(
+            r'(\\epsilon|\\varepsilon|[A-Za-z])\s+(\d+)',
+            r'\1^{\2}',
+            fixed_expr
+        )
+
+        # Create the final math expression
+        old_text = match.group(0)
+        new_text = f'${var} = {fixed_expr}$'
+
+        # Only yield if something actually changed
+        if new_text != f'${old_text}$':
+            yield LintIssue(
+                rule="merge_math_expressions",
+                severity=Severity.AUTO_FIX,
+                line=line_num,
+                message=f"Merge math expression: {old_text[:60]}... → {new_text[:60]}...",
+                fix=Fix(old=old_text, new=new_text)
+            )
+
+
+def operator_subscript_correction(content: str) -> Generator[LintIssue, None, None]:
+    """
+    Fix operators that incorrectly use superscripts instead of subscripts.
+
+    In category theory and algebraic geometry, products and tensor products
+    over a base use SUBSCRIPT notation:
+    - \\times^{S} → \\times_{S} (fiber product over S)
+    - \\otimes^{R} → \\otimes_{R} (tensor product over R)
+    - \\prod^{I} → \\prod_{I} (product over index set I)
+    - \\coprod^{I} → \\coprod_{I} (coproduct over index set I)
+
+    This fixes cases where html_math_notation incorrectly converted to superscript.
+    """
+    # Pattern: operator with superscript that should be subscript
+    pattern = re.compile(
+        r'(\\(?:times|otimes|prod|coprod))\^(\{[^}]+\}|[A-Za-z][A-Za-z0-9]*)',
+        re.IGNORECASE
+    )
+
+    for match in pattern.finditer(content):
+        # Skip if inside math mode check - but actually we want to fix these even in math mode
+        operator = match.group(1)
+        subscript = match.group(2)
+        line_num = content[:match.start()].count('\n') + 1
+
+        old_text = match.group(0)
+        new_text = f'{operator}_{subscript}'
+
+        yield LintIssue(
+            rule="operator_subscript_correction",
+            severity=Severity.AUTO_FIX,
+            line=line_num,
+            message=f"Fix operator subscript: {old_text} → {new_text}",
+            fix=Fix(old=old_text, new=new_text)
+        )
+
+
+def bold_number_sets(content: str) -> Generator[LintIssue, None, None]:
+    """
+    Convert standalone bold letters to blackboard bold notation.
+
+    In mathematical texts, bold letters representing number sets are often
+    transcribed as **C**, **Z**, **R**, **Q**, **N** but should be rendered
+    as $\\mathbb{C}$, $\\mathbb{Z}$, $\\mathbb{R}$, $\\mathbb{Q}$, $\\mathbb{N}$.
+
+    Also handles:
+    - **A** → $\\mathbb{A}$ (algebraic numbers, affine space)
+    - **P** → $\\mathbb{P}$ (projective space, primes)
+    - **F** → $\\mathbb{F}$ (finite fields)
+    - **H** → $\\mathbb{H}$ (quaternions, upper half-plane)
+    - **G** → $\\mathbb{G}$ (additive/multiplicative group)
+
+    Patterns:
+    - **C** → $\\mathbb{C}$
+    - ** C ** → $\\mathbb{C}$ (with spaces)
+    - Preserves existing math mode
+    """
+    # Mapping of letters to their blackboard bold equivalents
+    BLACKBOARD_LETTERS = {
+        'C': r'\mathbb{C}',  # Complex numbers
+        'Z': r'\mathbb{Z}',  # Integers
+        'R': r'\mathbb{R}',  # Real numbers
+        'Q': r'\mathbb{Q}',  # Rational numbers
+        'N': r'\mathbb{N}',  # Natural numbers
+        'A': r'\mathbb{A}',  # Algebraic numbers / Affine space
+        'P': r'\mathbb{P}',  # Projective space / Primes
+        'F': r'\mathbb{F}',  # Finite fields
+        'H': r'\mathbb{H}',  # Quaternions / Upper half-plane
+        'G': r'\mathbb{G}',  # Additive/multiplicative group
+    }
+
+    # Pattern: **X** with optional spaces inside
+    # Matches: **C**, ** C **, **Z**, etc.
+    pattern = re.compile(r'\*\*\s*([A-Z])\s*\*\*')
+
+    for match in pattern.finditer(content):
+        letter = match.group(1)
+
+        # Only process if it's one of our blackboard letters
+        if letter not in BLACKBOARD_LETTERS:
+            continue
+
+        # Skip if already in math mode
+        if is_in_math_mode(content, match.start()):
+            continue
+
+        line_num = content[:match.start()].count('\n') + 1
+        old_text = match.group(0)
+        new_text = f'${BLACKBOARD_LETTERS[letter]}$'
+
+        yield LintIssue(
+            rule="bold_number_sets",
+            severity=Severity.AUTO_FIX,
+            line=line_num,
+            message=f"Convert bold to blackboard bold: {old_text} → {new_text}",
+            fix=Fix(old=old_text, new=new_text)
+        )

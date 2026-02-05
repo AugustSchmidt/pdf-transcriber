@@ -30,6 +30,9 @@ RULES = {
     "broken_math_delimiters": math.broken_math_delimiters,
     "space_in_math_variable": math.space_in_math_variable,
     "display_math_whitespace": math.display_math_whitespace,
+    "bold_number_sets": math.bold_number_sets,
+    "merge_math_expressions": math.merge_math_expressions,
+    "operator_subscript_correction": math.operator_subscript_correction,
 }
 
 # Rules that are safe to auto-fix by default
@@ -50,6 +53,9 @@ DEFAULT_AUTO_FIX = {
     "broken_math_delimiters",
     "space_in_math_variable",
     "unicode_math_symbols",
+    "bold_number_sets",
+    "merge_math_expressions",
+    "operator_subscript_correction",
 }
 
 __all__ = ["RULES", "DEFAULT_AUTO_FIX", "markdown", "artifacts", "math"]

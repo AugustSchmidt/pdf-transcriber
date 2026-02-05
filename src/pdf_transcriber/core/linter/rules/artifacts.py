@@ -347,6 +347,14 @@ def html_math_notation(content: str) -> Generator[LintIssue, None, None]:
         re.IGNORECASE
     )
 
+    # Pattern 9a: Fragmented math with operator: \times$<sup>S</sup> → \times_S
+    # Handles cases where LaTeX operator is followed by $ and then HTML sub/sup
+    # Note: \times_S is correct (subscript for "product over S")
+    pattern_fragmented_operator = re.compile(
+        r'(\\(?:times|otimes|prod|coprod))\$\s*<sup>([A-Za-z′\'][^<]*)</sup>',
+        re.IGNORECASE
+    )
+
     # Pattern 9: Tensor product subscript: ⊗<sup>R</sup> → ⊗_R
     # In standard notation, the ring goes as subscript: ⊗_R
     pattern_tensor = re.compile(
@@ -649,6 +657,26 @@ def html_math_notation(content: str) -> Generator[LintIssue, None, None]:
             fix=Fix(old=full_match, new=replacement)
         ))
 
+    # Process fragmented operator notation: \times$<sup>S</sup> → \times_S
+    # This handles cases where a LaTeX operator is followed by $ and HTML
+    for match in pattern_fragmented_operator.finditer(content):
+        operator = match.group(1)  # e.g., \times
+        subscript = match.group(2)  # e.g., S or S'
+        full_match = match.group(0)
+        line_num = content[:match.start()].count('\n') + 1
+
+        # The $ is part of the fragmentation - remove it and use subscript notation
+        # Products/coproducts over a base use subscript: \times_S, \otimes_R
+        replacement = f'{operator}_{{{subscript}}}'
+
+        issues.append(LintIssue(
+            rule="html_math_notation",
+            severity=Severity.AUTO_FIX,
+            line=line_num,
+            message=f"Fix fragmented operator: {full_match} → {replacement}",
+            fix=Fix(old=full_match, new=replacement)
+        ))
+
     # Process tensor subscripts: ⊗<sup>R</sup> → $⊗_R$ (should be subscript)
     for match in pattern_tensor.finditer(content):
         tensor = match.group(1)
@@ -840,32 +868,43 @@ def html_math_notation(content: str) -> Generator[LintIssue, None, None]:
         full_match = match.group(0)
         line_num = content[:match.start()].count('\n') + 1
 
-        # Check if math ends with a superscript - if so, merge
-        # e.g., $R^{≥}$ + <sup>0</sup> → $R^{\geq 0}$
-        superscript_match = re.search(r'\^(\{[^}]*\}|[A-Za-z0-9≥≤−+])$', math_content)
+        # Check if math ends with an operator that should use subscript
+        # e.g., $C \times$ + <sup>S</sup> → $C \times_S$ (NOT superscript!)
+        operator_match = re.search(r'\\(times|otimes|prod|coprod)\s*$', math_content)
 
-        if superscript_match:
-            existing_sup = superscript_match.group(1)
-            if existing_sup.startswith('{'):
-                # ^{≥} + 0 → ^{\geq 0}
-                inner = existing_sup[1:-1]
-                # Normalize symbols
-                inner = inner.replace('≥', '\\geq ').replace('≤', '\\leq ').replace('−', '-')
-                new_sup = f'^{{{inner}{sup_content}}}'
-            else:
-                # ^≥ + 0 → ^{\geq 0}
-                normalized = existing_sup.replace('≥', '\\geq ').replace('≤', '\\leq ').replace('−', '-')
-                new_sup = f'^{{{normalized}{sup_content}}}'
-            replacement = math_content[:superscript_match.start()] + new_sup + '$'
+        if operator_match:
+            # Binary operator - use subscript for "over S" notation
+            replacement = f'{math_content}_{{{sup_content}}}$'
+            message_type = "operator subscript"
         else:
-            # No existing superscript, just append
-            replacement = f'{math_content}^{{{sup_content}}}$'
+            # Check if math ends with a superscript - if so, merge
+            # e.g., $R^{≥}$ + <sup>0</sup> → $R^{\geq 0}$
+            superscript_match = re.search(r'\^(\{[^}]*\}|[A-Za-z0-9≥≤−+])$', math_content)
+
+            if superscript_match:
+                existing_sup = superscript_match.group(1)
+                if existing_sup.startswith('{'):
+                    # ^{≥} + 0 → ^{\geq 0}
+                    inner = existing_sup[1:-1]
+                    # Normalize symbols
+                    inner = inner.replace('≥', '\\geq ').replace('≤', '\\leq ').replace('−', '-')
+                    new_sup = f'^{{{inner}{sup_content}}}'
+                else:
+                    # ^≥ + 0 → ^{\geq 0}
+                    normalized = existing_sup.replace('≥', '\\geq ').replace('≤', '\\leq ').replace('−', '-')
+                    new_sup = f'^{{{normalized}{sup_content}}}'
+                replacement = math_content[:superscript_match.start()] + new_sup + '$'
+                message_type = "merge superscript"
+            else:
+                # No existing superscript, just append
+                replacement = f'{math_content}^{{{sup_content}}}$'
+                message_type = "add superscript"
 
         issues.append(LintIssue(
             rule="html_math_notation",
             severity=Severity.AUTO_FIX,
             line=line_num,
-            message=f"Math+sup merge: {full_match[:40]}... → {replacement[:40]}...",
+            message=f"Math+sup {message_type}: {full_match[:40]}... → {replacement[:40]}...",
             fix=Fix(old=full_match, new=replacement)
         ))
 
