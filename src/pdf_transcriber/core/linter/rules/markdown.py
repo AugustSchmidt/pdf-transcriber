@@ -189,3 +189,136 @@ def long_line(content: str, max_length: int = 500) -> Generator[LintIssue, None,
                 message=f"Line is {len(line)} chars (max {max_length}): {preview}",
                 fix=None  # Needs manual review
             )
+
+
+def excessive_horizontal_rules(content: str) -> Generator[LintIssue, None, None]:
+    """
+    Remove excessive consecutive horizontal rules (---).
+
+    Marker uses --- as page break separators, but sometimes these accumulate
+    (especially for blank pages or when page detection fails). More than 2
+    consecutive horizontal rules is almost always an artifact.
+
+    Example:
+        ---
+
+
+        ---
+
+
+        ---
+
+    Should be:
+        ---
+
+    """
+    # Pattern: 3 or more "---" markers with any amount of whitespace between them
+    # Match: ---\n(any whitespace including newlines)---\n(whitespace)---
+    pattern = re.compile(
+        r'(?:---\s*\n\s*){3,}',  # 3+ occurrences of "---" followed by whitespace
+        re.MULTILINE
+    )
+
+    for match in pattern.finditer(content):
+        line_num = content[:match.start()].count('\n') + 1
+        count = match.group().count('---')
+
+        # Replace with single horizontal rule
+        old_text = match.group()
+        new_text = '---\n\n'  # Single rule with blank line after
+
+        yield LintIssue(
+            rule="excessive_horizontal_rules",
+            severity=Severity.AUTO_FIX,
+            line=line_num,
+            message=f"{count} consecutive horizontal rules (reducing to 1)",
+            fix=Fix(old=old_text, new=new_text)
+        )
+
+
+def unwrapped_sentences(content: str) -> Generator[LintIssue, None, None]:
+    """
+    Fix sentences that are randomly split across lines mid-sentence.
+
+    Example:
+        But this is a view from the mountaintop, looking down, and not the best way to
+
+        explore the forests.
+
+    Should be:
+        But this is a view from the mountaintop, looking down, and not the best way to explore the forests.
+
+    Detection heuristic:
+    - Line ends with lowercase word (not sentence-ending punctuation)
+    - Followed by blank line(s)
+    - Next non-blank line starts with lowercase letter
+    - → Join them together with a space
+    """
+
+    lines = content.split('\n')
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+
+        # Skip blank lines
+        if not line.strip():
+            i += 1
+            continue
+
+        stripped = line.rstrip()
+
+        # Skip lines ending with sentence-ending punctuation or special chars
+        if re.search(r'[.!?:;\-\])\}]$', stripped):
+            i += 1
+            continue
+
+        # Skip headers (start with # or all caps)
+        if stripped.startswith('#') or (stripped.isupper() and len(stripped) < 100):
+            i += 1
+            continue
+
+        # Skip lines ending with math delimiters
+        if stripped.endswith('$') or stripped.endswith('$$'):
+            i += 1
+            continue
+
+        # Look ahead for next non-blank line
+        j = i + 1
+        blank_count = 0
+        next_line = None
+
+        while j < len(lines):
+            if lines[j].strip():
+                next_line = lines[j]
+                break
+            blank_count += 1
+            j += 1
+
+        if next_line is None:
+            i += 1
+            continue
+
+        # Check if next line starts with lowercase (sentence continuation)
+        next_stripped = next_line.lstrip()
+        if next_stripped and next_stripped[0].islower():
+            # Mid-sentence break detected
+            line_num = content[:content.find(line)].count('\n') + 1
+
+            # Build fix: join lines with single space
+            old_text = stripped + '\n' + '\n' * blank_count + next_line
+            new_text = stripped + ' ' + next_stripped
+
+            yield LintIssue(
+                rule="unwrapped_sentences",
+                severity=Severity.AUTO_FIX,
+                line=line_num,
+                message=f"Sentence split mid-line, {blank_count} blank line(s) before continuation",
+                fix=Fix(old=old_text, new=new_text)
+            )
+
+            # Skip past processed lines
+            i = j + 1
+            continue
+
+        i += 1

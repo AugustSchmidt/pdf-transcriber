@@ -3,419 +3,8 @@ import re
 from typing import Generator
 
 from ..models import LintIssue, Severity, Fix
-
-
-# Unicode to LaTeX mapping for common math symbols
-UNICODE_TO_LATEX = {
-    # Greek letters (commonly appear outside $...$)
-    '◦': r'\circ',
-    '∗': '*',
-    '∞': r'\infty',
-    'Ω': r'\Omega',
-    'α': r'\alpha',
-    'β': r'\beta',
-    'γ': r'\gamma',
-    'δ': r'\delta',
-    'ε': r'\varepsilon',
-    'ζ': r'\zeta',
-    'η': r'\eta',
-    'θ': r'\theta',
-    'ι': r'\iota',
-    'κ': r'\kappa',
-    'λ': r'\lambda',
-    'μ': r'\mu',
-    'ν': r'\nu',
-    'ξ': r'\xi',
-    'π': r'\pi',
-    'ρ': r'\rho',
-    'σ': r'\sigma',
-    'τ': r'\tau',
-    'υ': r'\upsilon',
-    'φ': r'\varphi',
-    'χ': r'\chi',
-    'ψ': r'\psi',
-    'ω': r'\omega',
-    'Γ': r'\Gamma',
-    'Δ': r'\Delta',
-    'Θ': r'\Theta',
-    'Λ': r'\Lambda',
-    'Ξ': r'\Xi',
-    'Π': r'\Pi',
-    'Σ': r'\Sigma',
-    'Υ': r'\Upsilon',
-    'Φ': r'\Phi',
-    'Ψ': r'\Psi',
-
-    # Relations
-    '∈': r'\in',
-    '∉': r'\notin',
-    '⊂': r'\subset',
-    '⊃': r'\supset',
-    '⊆': r'\subseteq',
-    '⊇': r'\supseteq',
-    '≤': r'\leq',
-    '≥': r'\geq',
-    '≠': r'\neq',
-    '≈': r'\approx',
-    '≡': r'\equiv',
-    '∼': r'\sim',
-    '≃': r'\simeq',
-    '≅': r'\cong',
-    '∝': r'\propto',
-
-    # Arrows
-    '→': r'\to',
-    '←': r'\leftarrow',
-    '↔': r'\leftrightarrow',
-    '⇒': r'\Rightarrow',
-    '⇐': r'\Leftarrow',
-    '⇔': r'\Leftrightarrow',
-    '↦': r'\mapsto',
-    '↪': r'\hookrightarrow',
-    '↠': r'\twoheadrightarrow',
-
-    # Operators
-    '×': r'\times',
-    '÷': r'\div',
-    '±': r'\pm',
-    '∓': r'\mp',
-    '⊗': r'\otimes',
-    '⊕': r'\oplus',
-    '∩': r'\cap',
-    '∪': r'\cup',
-    '∧': r'\wedge',
-    '∨': r'\vee',
-    '∘': r'\circ',
-    '·': r'\cdot',
-    '†': r'\dagger',
-    '‡': r'\ddagger',
-
-    # Quantifiers and logic
-    '∀': r'\forall',
-    '∃': r'\exists',
-    '∄': r'\nexists',
-    '¬': r'\neg',
-    '∅': r'\emptyset',
-
-    # Calculus and analysis
-    '∂': r'\partial',
-    '∇': r'\nabla',
-    '∫': r'\int',
-    '∑': r'\sum',
-    '∏': r'\prod',
-    '√': r'\sqrt',
-
-    # Misc
-    '⊥': r'\perp',
-    '∥': r'\parallel',
-    '⟨': r'\langle',
-    '⟩': r'\rangle',
-    '⌊': r'\lfloor',
-    '⌋': r'\rfloor',
-    '⌈': r'\lceil',
-    '⌉': r'\rceil',
-    '♭': r'\flat',
-    '♯': r'\sharp',
-    '♮': r'\natural',
-    'ℓ': r'\ell',
-    'ℕ': r'\mathbb{N}',
-    'ℤ': r'\mathbb{Z}',
-    'ℚ': r'\mathbb{Q}',
-    'ℝ': r'\mathbb{R}',
-    'ℂ': r'\mathbb{C}',
-}
-
-# Patterns that indicate unwrapped math when outside $...$
-MATH_PATTERNS = [
-    # Letter with Unicode superscript/subscript
-    (r'([A-Za-z])◦◦', r'$\1^{\circ\circ}$'),  # K◦◦ → $K^{\circ\circ}$
-    (r'([A-Za-z])◦(?!◦)', r'$\1^{\circ}$'),   # K◦ → $K^{\circ}$ (not K◦◦)
-    (r'([A-Za-z])∗', r'$\1^*$'),               # K∗ → $K^*$
-
-    # Common perfectoid/p-adic patterns
-    (r'\|([A-Za-z])\|', r'$|\1|$'),            # |K| → $|K|$
-    (r'\|([A-Za-z])\∗\|', r'$|\1^*|$'),        # |K∗| → $|K^*|$
-]
-
-
-def is_in_math_mode(content: str, pos: int) -> bool:
-    """Check if position is inside $...$ math mode."""
-    # Look backwards for unescaped $
-    before = content[max(0, pos - 200):pos]
-    dollars = len(re.findall(r'(?<!\\)\$', before))
-    return dollars % 2 == 1
-
-
-def unicode_math_symbols(content: str) -> Generator[LintIssue, None, None]:
-    """
-    Detect and fix Unicode math symbols outside of math mode.
-
-    Unicode symbols like ◦, ∈, →, Ω should be inside $...$ delimiters
-    to render properly in LaTeX/markdown math.
-
-    Handles adjacency to existing math blocks:
-    - ``$K^*$ ∈ R`` → ``$K^* \\in R$`` (extend existing math)
-    - ``x ∈ $S$`` → ``$x \\in S$`` (merge into existing math)
-    - ``K ∈ R`` → ``$K \\in R$`` (new math block for the expression)
-    - Standalone ``∞`` → ``$\\infty$``
-    """
-    issues = []
-    processed_ranges = set()  # Track ranges we've already handled
-
-    # Process arrows FIRST - they may be part of function notation like "f: X → Y"
-    # which should capture the entire expression including any Greek letter function names
-    arrow_chars = ('→', '←', '↔', '↦', '⇒', '⇐', '⇔', '↪', '↠')
-
-    # Reorder: arrows first, then everything else
-    ordered_items = []
-    for char, latex in UNICODE_TO_LATEX.items():
-        if char in arrow_chars:
-            ordered_items.insert(0, (char, latex))  # Arrows go first
-        else:
-            ordered_items.append((char, latex))
-
-    # Process all Unicode symbols
-    for char, latex in ordered_items:
-        for match in re.finditer(re.escape(char), content):
-            pos = match.start()
-
-            # Skip if inside math mode
-            if is_in_math_mode(content, pos):
-                continue
-
-            # Skip if we've already processed this position
-            if any(start <= pos < end for start, end in processed_ranges):
-                continue
-
-            line_num = content[:pos].count('\n') + 1
-
-            # Look for adjacent math context
-            # Check before: is there a $...$ immediately before (with optional space)?
-            before_context = content[max(0, pos - 100):pos]
-            after_context = content[match.end():min(len(content), match.end() + 100)]
-
-            # Special case: Function notation like "f: X → Y" or "φ: A → B"
-            # This is common in math and should be captured as a whole
-            if char in ('→', '←', '↔', '↦', '⇒', '⇐', '⇔', '↪', '↠'):
-                # Pattern: [letter][optional subscript]: [expr] [arrow] [expr]
-                func_pattern = re.search(
-                    r'([A-Za-zαβγδεζηθικλμνξπρστυφχψω][A-Za-z0-9_]*)\s*:\s*'
-                    r'([A-Za-z_][A-Za-z0-9_×⊗]*)\s*$',
-                    before_context
-                )
-                if func_pattern:
-                    func_name = func_pattern.group(1)
-                    domain = func_pattern.group(2)
-
-                    # Look for codomain after the arrow
-                    codomain_match = re.match(r'\s*([A-Za-z_][A-Za-z0-9_×⊗]*)', after_context)
-                    if codomain_match:
-                        codomain = codomain_match.group(1)
-
-                        old_start = pos - len(func_pattern.group(0))
-                        old_end = match.end() + len(codomain_match.group(0))
-                        old_text = content[old_start:old_end]
-
-                        # Use \colon for function notation (proper LaTeX)
-                        new_text = f'${func_name} \\colon {domain} {latex} {codomain}$'
-
-                        issues.append(LintIssue(
-                            rule="unicode_math_symbols",
-                            severity=Severity.AUTO_FIX,
-                            line=line_num,
-                            message=f"Function notation: {old_text} → {new_text}",
-                            fix=Fix(old=old_text, new=new_text)
-                        ))
-                        processed_ranges.add((old_start, old_end))
-                        continue
-
-            # Pattern: $...$[space]*[unicode] - math block ends right before
-            math_before = re.search(r'\$([^$]+)\$(\s*)$', before_context)
-
-            # Pattern: [unicode][space]*$...$  - math block starts right after
-            math_after = re.match(r'(\s*)\$([^$]+)\$', after_context)
-
-            # Check for math-like content adjacent (variables, operators)
-            # Math-like: single letters, subscripts, common math words
-            var_before = re.search(r'([A-Za-z_][A-Za-z0-9_]*|\)|\])\s*$', before_context)
-            var_after = re.match(r'\s*([A-Za-z_][A-Za-z0-9_]*|\(|\[)', after_context)
-
-            if math_before and math_after:
-                # Unicode symbol between two math blocks: $A$ ∈ $B$ → $A \in B$
-                math_content_before = math_before.group(1)
-                space_before = math_before.group(2)
-                space_after = math_after.group(1)
-                math_content_after = math_after.group(2)
-
-                old_start = pos - len(math_before.group(0))
-                old_end = match.end() + len(math_after.group(0))
-                old_text = content[old_start:old_end]
-                new_text = f'${math_content_before} {latex} {math_content_after}$'
-
-                issues.append(LintIssue(
-                    rule="unicode_math_symbols",
-                    severity=Severity.AUTO_FIX,
-                    line=line_num,
-                    message=f"Merge math blocks: {old_text[:50]}... → {new_text[:50]}...",
-                    fix=Fix(old=old_text, new=new_text)
-                ))
-                processed_ranges.add((old_start, old_end))
-
-            elif math_before:
-                # Unicode symbol after math block: $K^*$ ∈ R → $K^* \in R$
-                math_content = math_before.group(1)
-                space = math_before.group(2)
-
-                # Capture any trailing math-like content
-                trailing = ""
-                trailing_match = re.match(r'(\s*[A-Za-z_][A-Za-z0-9_]*)', after_context)
-                if trailing_match:
-                    trailing = trailing_match.group(1)
-
-                old_start = pos - len(math_before.group(0))
-                old_end = match.end() + len(trailing)
-                old_text = content[old_start:old_end]
-                new_text = f'${math_content} {latex}{trailing}$'
-
-                issues.append(LintIssue(
-                    rule="unicode_math_symbols",
-                    severity=Severity.AUTO_FIX,
-                    line=line_num,
-                    message=f"Extend math block: {old_text[:50]} → {new_text[:50]}",
-                    fix=Fix(old=old_text, new=new_text)
-                ))
-                processed_ranges.add((old_start, old_end))
-
-            elif math_after:
-                # Unicode symbol before math block: x ∈ $S$ → $x \in S$
-                space = math_after.group(1)
-                math_content = math_after.group(2)
-
-                # Capture any leading math-like content
-                leading = ""
-                leading_match = re.search(r'([A-Za-z_][A-Za-z0-9_]*\s*)$', before_context)
-                if leading_match:
-                    leading = leading_match.group(1)
-
-                old_start = pos - len(leading)
-                old_end = match.end() + len(math_after.group(0))
-                old_text = content[old_start:old_end]
-                new_text = f'${leading.strip()} {latex} {math_content}$'
-
-                issues.append(LintIssue(
-                    rule="unicode_math_symbols",
-                    severity=Severity.AUTO_FIX,
-                    line=line_num,
-                    message=f"Extend math block: {old_text[:50]} → {new_text[:50]}",
-                    fix=Fix(old=old_text, new=new_text)
-                ))
-                processed_ranges.add((old_start, old_end))
-
-            elif var_before and var_after:
-                # Between two variables: x ∈ R → $x \in R$
-                leading = var_before.group(0)
-                trailing_match = re.match(r'\s*([A-Za-z_][A-Za-z0-9_]*)', after_context)
-                trailing = trailing_match.group(0) if trailing_match else ""
-
-                old_start = pos - len(leading)
-                old_end = match.end() + len(trailing)
-                old_text = content[old_start:old_end]
-                new_text = f'${leading.strip()} {latex} {trailing.strip()}$'
-
-                issues.append(LintIssue(
-                    rule="unicode_math_symbols",
-                    severity=Severity.AUTO_FIX,
-                    line=line_num,
-                    message=f"Wrap expression: {old_text} → {new_text}",
-                    fix=Fix(old=old_text, new=new_text)
-                ))
-                processed_ranges.add((old_start, old_end))
-
-            elif var_before:
-                # After a variable: K∗ → $K^*$ or K ∈ → $K \in$
-                leading = var_before.group(0).strip()
-
-                # Skip common English words - these aren't math variables
-                # Fall through to standalone handling instead
-                common_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
-                               'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-                               'could', 'should', 'may', 'might', 'must', 'shall', 'can',
-                               'of', 'to', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
-                               'as', 'or', 'and', 'but', 'if', 'then', 'that', 'this',
-                               'it', 'its', 'we', 'they', 'he', 'she', 'not', 'so', 'up',
-                               'value', 'values'}
-                if leading.lower() in common_words:
-                    # Fall through to standalone symbol handling
-                    old_text = char
-                    new_text = f'${latex}$'
-
-                    issues.append(LintIssue(
-                        rule="unicode_math_symbols",
-                        severity=Severity.AUTO_FIX,
-                        line=line_num,
-                        message=f"Wrap standalone: {old_text} → {new_text}",
-                        fix=Fix(old=old_text, new=new_text)
-                    ))
-                    processed_ranges.add((pos, match.end()))
-                    continue
-
-                old_start = pos - len(var_before.group(0))
-                old_end = match.end()
-                old_text = content[old_start:old_end]
-
-                # For superscript-like symbols (◦, ∗, ∞), use superscript notation
-                if char in ('◦', '∗', '∞'):
-                    # latex already has the backslash, just use it directly
-                    new_text = f'${leading}^{{{latex}}}$'
-                else:
-                    new_text = f'${leading} {latex}$'
-
-                issues.append(LintIssue(
-                    rule="unicode_math_symbols",
-                    severity=Severity.AUTO_FIX,
-                    line=line_num,
-                    message=f"Wrap with variable: {old_text} → {new_text}",
-                    fix=Fix(old=old_text, new=new_text)
-                ))
-                processed_ranges.add((old_start, old_end))
-
-            elif var_after:
-                # Before a variable: ∈ R → $\in R$
-                trailing_match = re.match(r'\s*([A-Za-z_][A-Za-z0-9_]*)', after_context)
-                trailing = trailing_match.group(0) if trailing_match else ""
-
-                old_start = pos
-                old_end = match.end() + len(trailing)
-                old_text = content[old_start:old_end]
-                new_text = f'${latex} {trailing.strip()}$'
-
-                issues.append(LintIssue(
-                    rule="unicode_math_symbols",
-                    severity=Severity.AUTO_FIX,
-                    line=line_num,
-                    message=f"Wrap with variable: {old_text} → {new_text}",
-                    fix=Fix(old=old_text, new=new_text)
-                ))
-                processed_ranges.add((old_start, old_end))
-
-            else:
-                # Standalone symbol: ∞ → $\infty$
-                old_text = char
-                new_text = f'${latex}$'
-
-                issues.append(LintIssue(
-                    rule="unicode_math_symbols",
-                    severity=Severity.AUTO_FIX,
-                    line=line_num,
-                    message=f"Wrap standalone: {old_text} → {new_text}",
-                    fix=Fix(old=old_text, new=new_text)
-                ))
-                processed_ranges.add((pos, match.end()))
-
-    # Sort by line and yield
-    issues.sort(key=lambda x: x.line)
-    for issue in issues:
-        yield issue
+from .math_constants import UNICODE_TO_LATEX, MATH_PATTERNS, is_in_math_mode
+from .math_unicode import unicode_math_symbols  # noqa: F401
 
 
 def unwrapped_math_expressions(content: str) -> Generator[LintIssue, None, None]:
@@ -525,6 +114,12 @@ def broken_math_delimiters(content: str) -> Generator[LintIssue, None, None]:
 
     for match in pattern_abs_outside.finditer(content):
         inner = match.group(1)
+
+        # Skip if inner starts and ends with | — that's a norm notation
+        # (handled by broken_norm_notation rule)
+        if inner.startswith('|') and inner.endswith('|'):
+            continue
+
         line_num = content[:match.start()].count('\n') + 1
 
         yield LintIssue(
@@ -554,6 +149,187 @@ def broken_math_delimiters(content: str) -> Generator[LintIssue, None, None]:
             message=f"Split math expression: ${math_part}${trailing} → ${fixed_math}{trailing}$",
             fix=Fix(old=match.group(), new=f'${fixed_math}{trailing}$')
         )
+
+
+def broken_norm_notation(content: str) -> Generator[LintIssue, None, None]:
+    """
+    Detect and fix broken norm (double-bar) notation from OCR artifacts.
+
+    When Marker OCR encounters double vertical bars (norm notation), it
+    breaks them into combinations of pipe characters and math delimiters:
+
+    - |$|x|$| → $\\|x\\|$  (bars outside dollar-enclosed bars)
+    - $|$x$|$ → $\\|x\\|$  (dollar-bar-dollar sequences)
+    - ||x|| inside math → \\|x\\|  (raw double pipes in math mode)
+
+    This is distinct from broken_math_delimiters which handles single-bar
+    absolute value |$x$| → $|x|$ (moving bars inside math mode).
+    """
+    # Pattern 1: |$|...|$| — bars outside dollar-enclosed inner content
+    # OCR produces this when ‖ gets split across math delimiter boundaries
+    pattern_bars_dollars = re.compile(
+        r'\|\$\|([^$|]+)\|\$\|'
+    )
+
+    for match in pattern_bars_dollars.finditer(content):
+        inner = match.group(1)
+        line_num = content[:match.start()].count('\n') + 1
+
+        yield LintIssue(
+            rule="broken_norm_notation",
+            severity=Severity.AUTO_FIX,
+            line=line_num,
+            message=f"Broken norm: |$|{inner}|$| → $\\|{inner}\\|$",
+            fix=Fix(old=match.group(), new=f'$\\|{inner}\\|$')
+        )
+
+    # Pattern 2: $|$...$|$ — dollar-bar-dollar wrapping content
+    # Another common OCR artifact where ‖ becomes $|$ on each side
+    pattern_dollar_bar = re.compile(
+        r'\$\|\$([^$|]+)\$\|\$'
+    )
+
+    for match in pattern_dollar_bar.finditer(content):
+        inner = match.group(1)
+        line_num = content[:match.start()].count('\n') + 1
+
+        yield LintIssue(
+            rule="broken_norm_notation",
+            severity=Severity.AUTO_FIX,
+            line=line_num,
+            message=f"Broken norm: $|${inner}$|$ → $\\|{inner}\\|$",
+            fix=Fix(old=match.group(), new=f'$\\|{inner}\\|$')
+        )
+
+    # Pattern 3: ||...|| inside math mode — raw double pipes should be \|...\|
+    # Only fix inside math mode to avoid conflicts with markdown tables
+    pattern_double_pipes = re.compile(
+        r'\|\|([^|]+)\|\|'
+    )
+
+    for match in pattern_double_pipes.finditer(content):
+        if not is_in_math_mode(content, match.start()):
+            continue
+
+        # Skip if already escaped
+        if '\\|' in match.group():
+            continue
+
+        inner = match.group(1)
+        line_num = content[:match.start()].count('\n') + 1
+
+        yield LintIssue(
+            rule="broken_norm_notation",
+            severity=Severity.AUTO_FIX,
+            line=line_num,
+            message=f"Norm in math: ||{inner}|| → \\|{inner}\\|",
+            fix=Fix(old=match.group(), new=f'\\|{inner}\\|')
+        )
+
+
+def fragmented_math_expression(content: str) -> Generator[LintIssue, None, None]:
+    """
+    Detect and merge fragmented inline math expressions.
+
+    OCR often splits a single math expression into multiple $...$ blocks
+    with operators or whitespace between them:
+
+    - $x$ + $y$ → $x + y$
+    - $x^2$ = $0$ → $x^2 = 0$
+    - $(s \\cdot t) \\cdot $a = s$\\cdot (t \\cdot a)$ → single expression
+
+    Merges consecutive $...$ blocks when the gap between them contains
+    no words (2+ alpha chars) and no prose punctuation (, ; : . ! ? or
+    paired delimiters). Gaps may contain operators, whitespace, single
+    variable letters, digits, and LaTeX commands like \\cdot.
+
+    Skips display math lines and pipe-only spans (handled by
+    broken_norm_notation).
+    """
+    for line_idx, line in enumerate(content.split('\n')):
+        stripped = line.strip()
+
+        # Skip display math lines
+        if stripped.startswith('$$') or stripped.endswith('$$'):
+            continue
+
+        # ── Find all inline $...$ spans ──
+        spans = []
+        i = 0
+        while i < len(line):
+            if line[i] == '$':
+                # Skip display math $$
+                if i + 1 < len(line) and line[i + 1] == '$':
+                    i += 2
+                    continue
+
+                # Find closing $
+                j = i + 1
+                while j < len(line) and line[j] != '$':
+                    j += 1
+
+                if j < len(line):
+                    inner = line[i + 1:j]
+                    # Skip empty spans and pipe-only spans (norm delimiters)
+                    if inner.strip() and inner not in ('|', '||'):
+                        spans.append((i, j + 1))
+                    i = j + 1
+                else:
+                    i += 1  # Unmatched $, skip
+            else:
+                i += 1
+
+        if len(spans) < 2:
+            continue
+
+        # ── Group consecutive spans with mergeable gaps ──
+        groups = []
+        current_group = [spans[0]]
+
+        for k in range(1, len(spans)):
+            prev_end = current_group[-1][1]
+            curr_start = spans[k][0]
+            gap = line[prev_end:curr_start]
+
+            # Strip LaTeX commands before checking for words
+            gap_no_latex = re.sub(r'\\[a-zA-Z]+', '', gap)
+            has_word = bool(re.search(r'[a-zA-Z]{2,}', gap_no_latex))
+            has_punct = bool(re.search(r'[,;:.!?()\[\]]', gap))
+
+            if not has_word and not has_punct:
+                current_group.append(spans[k])
+            else:
+                if len(current_group) >= 2:
+                    groups.append(current_group)
+                current_group = [spans[k]]
+
+        if len(current_group) >= 2:
+            groups.append(current_group)
+
+        # ── Yield a single fix per group ──
+        for group in groups:
+            first_start = group[0][0]
+            last_end = group[-1][1]
+            old_text = line[first_start:last_end]
+
+            # Build merged content: strip inner $ boundaries, keep gaps
+            parts = []
+            for k, (start, end) in enumerate(group):
+                parts.append(line[start + 1:end - 1])  # Inner math content
+                if k < len(group) - 1:
+                    gap = line[end:group[k + 1][0]]
+                    parts.append(gap)
+
+            new_text = '$' + ''.join(parts) + '$'
+
+            if old_text != new_text:
+                yield LintIssue(
+                    rule="fragmented_math_expression",
+                    severity=Severity.AUTO_FIX,
+                    line=line_idx + 1,
+                    message=f"Merge fragmented math: {old_text[:80]} → {new_text[:80]}",
+                    fix=Fix(old=old_text, new=new_text)
+                )
 
 
 def space_in_math_variable(content: str) -> Generator[LintIssue, None, None]:
