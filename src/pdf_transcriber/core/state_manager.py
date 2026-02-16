@@ -1,4 +1,6 @@
 """Resume-capable state management for PDF transcription jobs."""
+from __future__ import annotations
+
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -6,7 +8,28 @@ import json
 import logging
 import shutil
 
+from pdf_transcriber.events import (
+    read_event_log,
+    read_event_log_typed,
+    get_last_completed_page,
+    validate_completed_pages,
+)
+from pdf_transcriber.event_types import JobStartedEvent, ErrorEvent
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ProgressSummary:
+    """Typed progress summary returned by StateManager.get_progress_summary()."""
+    active: bool
+    completed: int
+    failed: int
+    pending: int
+    total: int
+    completion_percentage: float
+    started_at: str | None = None
+    last_updated: str | None = None
 
 
 @dataclass
@@ -54,10 +77,81 @@ class StateManager:
         self.paper_name = paper_name
         self.progress_dir = self.output_dir / paper_name / ".pdf-progress"
         self.state_file = self.progress_dir / "state.json"
+        self.events_log = self.output_dir / paper_name / "events.jsonl"
 
     def has_existing_job(self) -> bool:
         """Check if a resumable job exists."""
-        return self.state_file.exists()
+        # Check both new event log and old state.json for backward compatibility
+        return self.events_log.exists() or self.state_file.exists()
+
+    def load_state_from_events(self) -> TranscriptionState | None:
+        """
+        Load state by replaying event log.
+
+        This is the new event-driven resume approach. Falls back to
+        load_state() for backward compatibility.
+
+        Returns:
+            TranscriptionState reconstructed from events, None if no events
+        """
+        # Try event log first
+        if not self.events_log.exists():
+            # Fall back to old state.json
+            return self.load_state()
+
+        try:
+            # Read raw events for validate_completed_pages (operates on raw dicts)
+            raw_events = read_event_log(self.events_log)
+            if not raw_events:
+                return self.load_state()
+
+            # Read typed events for structured access
+            typed_events = read_event_log_typed(self.events_log)
+            if not typed_events:
+                return self.load_state()
+
+            # Find job_started event
+            job_started = None
+            for event in typed_events:
+                if isinstance(event, JobStartedEvent):
+                    job_started = event
+                    break
+
+            if not job_started:
+                logger.warning("No job_started event found, falling back to state.json")
+                return self.load_state()
+
+            # Collect completed and failed pages
+            all_completed, validated = validate_completed_pages(raw_events, validation_count=10)
+
+            failed_pages: list[int] = []
+            for event in typed_events:
+                if isinstance(event, ErrorEvent) and event.severity == "error":
+                    if event.page_number and event.page_number not in failed_pages:
+                        failed_pages.append(event.page_number)
+
+            # Reconstruct state — last timestamp from raw events (guaranteed non-empty)
+            last_ts = raw_events[-1].get("timestamp", job_started.timestamp)
+            state = TranscriptionState(
+                pdf_source=job_started.pdf_path,
+                total_pages=job_started.total_pages,
+                completed_pages=all_completed,
+                failed_pages=failed_pages,
+                output_format="markdown",  # hardcoded for now
+                quality=job_started.quality,
+                started_at=job_started.timestamp,
+                last_updated=last_ts,
+            )
+
+            logger.info(
+                f"Loaded state from events: {len(state.completed_pages)}/{state.total_pages} "
+                f"pages complete"
+            )
+            return state
+
+        except Exception as e:
+            logger.error(f"Failed to load state from events: {e}")
+            return self.load_state()
 
     def load_state(self) -> TranscriptionState | None:
         """
@@ -128,7 +222,8 @@ class StateManager:
             page_num: 1-indexed page number
             content: Transcribed content for this page
         """
-        state = self.load_state()
+        # Try event-based state first
+        state = self.load_state_from_events()
         if state is None:
             raise RuntimeError("No active job. Call create_job() first.")
 
@@ -156,7 +251,7 @@ class StateManager:
             page_num: 1-indexed page number
             error: Error message
         """
-        state = self.load_state()
+        state = self.load_state_from_events()
         if state is None:
             raise RuntimeError("No active job.")
 
@@ -172,25 +267,28 @@ class StateManager:
         """
         Get pages that still need processing.
 
+        On resume, previously failed pages are included so they get
+        retried. Only successfully completed pages are skipped.
+
         Returns:
-            List of page numbers (1-indexed) that haven't been completed or failed
+            List of page numbers (1-indexed) that haven't been completed
         """
-        state = self.load_state()
+        state = self.load_state_from_events()
         if state is None:
             return []
 
-        all_done = set(state.completed_pages) | set(state.failed_pages)
+        completed = set(state.completed_pages)
         pending = [
             page_num
             for page_num in range(1, state.total_pages + 1)
-            if page_num not in all_done
+            if page_num not in completed
         ]
 
         return pending
 
     def get_failed_pages(self) -> list[int]:
         """Get list of failed pages for retry."""
-        state = self.load_state()
+        state = self.load_state_from_events()
         if state is None:
             return []
         return state.failed_pages.copy()
@@ -230,7 +328,7 @@ class StateManager:
         Args:
             last_page: Last page number in the completed chunk
         """
-        state = self.load_state()
+        state = self.load_state_from_events()
         if state is None:
             return
 
@@ -248,7 +346,7 @@ class StateManager:
         Returns:
             Combined content from all completed pages
         """
-        state = self.load_state()
+        state = self.load_state_from_events()
         if state is None or not state.completed_pages:
             return ""
 
@@ -271,38 +369,38 @@ class StateManager:
         separator = "\n\n---\n\n"
         return separator.join(pages)
 
-    def get_progress_summary(self) -> dict:
+    def get_progress_summary(self) -> ProgressSummary:
         """
         Get summary of current progress.
 
         Returns:
-            Dictionary with progress metrics
+            ProgressSummary with progress metrics
         """
-        state = self.load_state()
+        state = self.load_state_from_events()
         if state is None:
-            return {
-                "active": False,
-                "completed": 0,
-                "failed": 0,
-                "pending": 0,
-                "total": 0,
-                "completion_percentage": 0.0
-            }
+            return ProgressSummary(
+                active=False,
+                completed=0,
+                failed=0,
+                pending=0,
+                total=0,
+                completion_percentage=0.0,
+            )
 
         pending = self.get_pending_pages()
         completed_count = len(state.completed_pages)
 
-        return {
-            "active": True,
-            "completed": completed_count,
-            "failed": len(state.failed_pages),
-            "pending": len(pending),
-            "total": state.total_pages,
-            "completion_percentage": (completed_count / state.total_pages * 100)
-                                     if state.total_pages > 0 else 0.0,
-            "started_at": state.started_at,
-            "last_updated": state.last_updated
-        }
+        return ProgressSummary(
+            active=True,
+            completed=completed_count,
+            failed=len(state.failed_pages),
+            pending=len(pending),
+            total=state.total_pages,
+            completion_percentage=(completed_count / state.total_pages * 100)
+                                  if state.total_pages > 0 else 0.0,
+            started_at=state.started_at,
+            last_updated=state.last_updated,
+        )
 
     def cleanup(self) -> None:
         """Remove progress directory after successful completion."""

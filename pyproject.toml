@@ -1,6 +1,6 @@
 [project]
 name = "pdf-transcriber"
-version = "1.0.0"
+version = "1.1.0"
 description = "Convert math-heavy PDFs to Markdown using Marker OCR with optional LLM enhancement"
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,8 @@ dependencies = [
     "pymupdf>=1.24.0",
     "pyyaml>=6.0",
     "marker-pdf>=1.10.1",
+    "psutil>=5.9",
+    "rich>=13.7",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +54,8 @@ Issues = "https://github.com/AugustSchmidt/pdf-transcriber/issues"
 [project.scripts]
 pdf-transcriber = "pdf_transcriber.server:main"
 pdf-transcriber-cli = "pdf_transcriber.cli:main"
+pdf-transcriber-tui = "pdf_transcriber.cli:tui_main"
+pdf-transcriber-cleanup = "pdf_transcriber.cleanup:main"
 
 [build-system]
 requires = ["hatchling"]

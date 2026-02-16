@@ -1,6 +1,6 @@
 """Core modules for PDF transcription."""
-from .transcription import (
-    TranscriptionEngine,
+from .transcription import TranscriptionEngine
+from .engine_cache import (
     TranscriptionResult,
     get_transcription_engine,
     clear_engine_cache,

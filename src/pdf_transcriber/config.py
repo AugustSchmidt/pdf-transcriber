@@ -8,9 +8,9 @@ import os
 class Config:
     """Configuration for PDF transcriber MCP server."""
 
-    # Output directory (relative to current working directory)
+    # Output directory (default to vault transcriptions directory)
     output_dir: Path = field(
-        default_factory=lambda: Path.cwd() / "transcriptions"
+        default_factory=lambda: Path.home() / "Vaults/PersonalVault/Math/Literature/Transcriptions"
     )
 
 
@@ -25,6 +25,7 @@ class Config:
     # Processing (markdown only - LaTeX removed for distribution)
     default_mode: str = "streaming"   # "streaming" or "batch"
     max_concurrent_pages: int = 3     # For batch mode (future)
+    disable_table_extraction: bool = True  # Disabled by default to enable MPS on Mac (set False to extract tables)
 
     # Marker OCR settings
     ocr_engine: str = "marker"
@@ -35,17 +36,21 @@ class Config:
     # LLM-enhanced OCR settings (Marker's built-in LLM mode)
     # NOTE: Requires a VISION model (VLM) - text-only models won't work
     use_llm: bool = True  # Enable Marker's LLM-enhanced OCR (default: on)
-    llm_service: str = "marker.services.ollama.OllamaService"  # LLM service class
+    llm_service: str = "marker.services.openai.OpenAIService"  # LLM service class
+
+    # Ollama settings (when llm_service = marker.services.ollama.OllamaService)
     ollama_base_url: str = "http://localhost:11434"  # Ollama server URL
-    # Model options (vision models only):
-    #   - qwen2.5vl:3b      (3.2 GB) - Recommended for 16GB RAM systems
-    #   - qwen2.5vl:7b      (5.5 GB) - Better quality, needs 24GB+ RAM
-    #   - qwen3-vl:4b       (3.5 GB) - Newest Qwen VL, excellent quality
-    ollama_model: str = "qwen2.5vl:3b"  # Default: Qwen2.5-VL 3B (memory-safe)
+    ollama_model: str = "qwen2.5vl:3b"
+
+    # OpenAI-compatible settings (when llm_service = marker.services.openai.OpenAIService)
+    # Works with mlx-vlm, vLLM, LM Studio, or any OpenAI-compatible endpoint
+    openai_base_url: str = "http://localhost:8080"  # mlx-vlm default port
+    openai_api_key: str = "not-needed"  # Local servers don't need keys
+    openai_model: str = "mlx-community/Qwen2.5-VL-3B-Instruct-4bit"
 
     # Chunking settings
-    chunk_size: int = 25  # Pages per chunk for large PDFs
-    auto_chunk_threshold: int = 100  # Auto-enable chunking for PDFs larger than this
+    chunk_size: int = 1  # Pages per chunk (1 = single-page processing, prevents page merges & hallucinations)
+    auto_chunk_threshold: int = 0  # Disabled - always use chunk_size=1 for reliability
 
     # State management
     progress_dir_name: str = ".pdf-progress"
@@ -97,6 +102,16 @@ class Config:
             config.ollama_base_url = val
         if val := os.environ.get("PDF_TRANSCRIBER_OLLAMA_MODEL"):
             config.ollama_model = val
+        if val := os.environ.get("PDF_TRANSCRIBER_OPENAI_BASE_URL"):
+            config.openai_base_url = val
+        if val := os.environ.get("PDF_TRANSCRIBER_OPENAI_API_KEY"):
+            config.openai_api_key = val
+        if val := os.environ.get("PDF_TRANSCRIBER_OPENAI_MODEL"):
+            config.openai_model = val
+
+        # Override table extraction setting from env
+        if val := os.environ.get("PDF_TRANSCRIBER_DISABLE_TABLE_EXTRACTION"):
+            config.disable_table_extraction = val.lower() in ("true", "1", "yes")
 
         # Ensure output directory exists
         config.output_dir.mkdir(parents=True, exist_ok=True)

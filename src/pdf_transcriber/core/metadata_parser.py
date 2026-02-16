@@ -40,19 +40,30 @@ class PaperMetadata:
     # Auto-extracted sections
     sections: list[dict] = field(default_factory=list)
 
+    # Pass-through for downstream tools (ghost resolver, concept extractor, etc.)
+    extra: dict = field(default_factory=dict)
+
     def to_dict(self) -> dict:
-        """Convert to dictionary, excluding None values."""
+        """Convert to dictionary, excluding None values.
+
+        Extra fields are merged at the top level so they appear
+        as regular frontmatter keys (not nested under 'extra').
+        """
         data = asdict(self)
-        # Remove None values for cleaner YAML
-        return {k: v for k, v in data.items() if v is not None and v != ""}
+        extra = data.pop("extra", {})
+        # Remove None/empty values for cleaner YAML
+        cleaned = {k: v for k, v in data.items() if v is not None and v != ""}
+        # Merge extra fields (they take precedence for user-specified overrides)
+        cleaned.update(extra)
+        return cleaned
 
     @classmethod
     def from_dict(cls, data: dict) -> "PaperMetadata":
-        """Create from dictionary."""
-        # Filter to only known fields
-        known_fields = {f.name for f in cls.__dataclass_fields__.values()}
-        filtered = {k: v for k, v in data.items() if k in known_fields}
-        return cls(**filtered)
+        """Create from dictionary, preserving unknown fields in extra."""
+        known_fields = {f.name for f in cls.__dataclass_fields__.values()} - {"extra"}
+        known = {k: v for k, v in data.items() if k in known_fields}
+        extra = {k: v for k, v in data.items() if k not in known_fields}
+        return cls(**known, extra=extra)
 
 
 def parse_frontmatter(content: str) -> tuple[PaperMetadata | None, str]:
@@ -130,12 +141,12 @@ def update_frontmatter(content: str, updates: dict) -> str:
         # No existing frontmatter, create new
         metadata = PaperMetadata(title="Unknown")
 
-    # Apply updates
+    # Apply updates — known fields set directly, unknown go to extra
     for key, value in updates.items():
-        if hasattr(metadata, key):
+        if hasattr(metadata, key) and key != "extra":
             setattr(metadata, key, value)
         else:
-            logger.warning(f"Unknown metadata field: {key}")
+            metadata.extra[key] = value
 
     return generate_frontmatter(metadata) + "\n" + body
 
@@ -224,12 +235,19 @@ def create_initial_metadata(
         total_pages: Total pages in PDF
         output_format: "markdown" or "latex"
         quality: Quality preset
-        **kwargs: Additional metadata fields (authors, year, keywords, etc.)
+        **kwargs: Additional metadata fields. Known fields (authors, year,
+            keywords, etc.) are set directly. Unknown fields are preserved
+            in ``extra`` for downstream tools.
 
     Returns:
         PaperMetadata
     """
     now = datetime.utcnow().isoformat() + "Z"
+
+    # Split kwargs into known dataclass fields vs extra pass-through
+    known_fields = {f.name for f in PaperMetadata.__dataclass_fields__.values()} - {"extra"}
+    known_kwargs = {k: v for k, v in kwargs.items() if k in known_fields}
+    extra_kwargs = {k: v for k, v in kwargs.items() if k not in known_fields}
 
     metadata = PaperMetadata(
         title=title,
@@ -239,7 +257,8 @@ def create_initial_metadata(
         quality=quality,
         total_pages=total_pages,
         transcribed_pages=total_pages,  # Will be updated during transcription
-        **kwargs
+        extra=extra_kwargs,
+        **known_kwargs
     )
 
     return metadata
