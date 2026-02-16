@@ -1,6 +1,6 @@
 # PDF Transcriber
 
-Convert math-heavy PDFs to Markdown using Marker OCR with optional LLM enhancement.
+Convert math-heavy PDFs to Markdown using Marker OCR with optional LLM enhancement. Includes telemetry, live monitoring, and automatic linting.
 
 ## Stability & Support
 
@@ -94,7 +94,26 @@ PDF Transcriber can use a local vision LLM (VLM) to significantly improve OCR ac
 - Low-quality scans
 - Tables and figures
 
-### Quick Start
+LLM enhancement is **enabled by default**. Two backend options are supported:
+
+### Option A: OpenAI-Compatible Server (Default)
+
+Works with any server that implements the OpenAI chat completions API — including **mlx-vlm**, **vLLM**, **LM Studio**, and **SGLang**.
+
+1. **Install and start a local server** (example with mlx-vlm):
+   ```bash
+   pip install mlx-vlm
+   mlx_vlm.server --model mlx-community/Qwen2.5-VL-3B-Instruct-4bit --port 8080
+   ```
+
+2. **Configure** (defaults work out of the box for mlx-vlm):
+   ```bash
+   # These are the defaults — only set if your setup differs
+   export PDF_TRANSCRIBER_OPENAI_BASE_URL=http://localhost:8080
+   export PDF_TRANSCRIBER_OPENAI_MODEL=mlx-community/Qwen2.5-VL-3B-Instruct-4bit
+   ```
+
+### Option B: Ollama
 
 1. **Install Ollama**: https://ollama.ai
 2. **Pull a vision model**:
@@ -105,15 +124,22 @@ PDF Transcriber can use a local vision LLM (VLM) to significantly improve OCR ac
    ```bash
    ollama serve
    ```
+4. **Switch to Ollama backend**:
+   ```bash
+   export PDF_TRANSCRIBER_LLM_SERVICE=marker.services.ollama.OllamaService
+   ```
 
-LLM enhancement is **enabled by default**. To disable:
+### Disabling LLM Enhancement
+
 ```bash
-# CLI
+# CLI flag
 pdf-transcriber-cli transcribe paper.pdf --no-llm
 
 # Environment variable
 PDF_TRANSCRIBER_USE_LLM=false
 ```
+
+This uses Marker OCR alone, which is still excellent for clean, typed PDFs.
 
 ### Recommended Vision Models
 
@@ -125,30 +151,88 @@ PDF_TRANSCRIBER_USE_LLM=false
 
 **Important**: Only **vision models** (VLMs) work. Text-only models like `llama3` won't process images.
 
-### Choosing a Model
+## Apple MPS Acceleration
 
-- **8GB RAM / M1 MacBook**: `qwen2.5vl:3b` (default)
-- **16GB RAM / M2/M3 Pro**: `qwen2.5vl:7b` or `qwen3-vl:4b`
-- **24GB+ / NVIDIA GPU**: `llava:13b` or larger
-- **CI/Automated pipelines**: `qwen2.5vl:3b` or disable LLM (`--no-llm`)
+On Mac, PDF Transcriber can use Metal Performance Shaders (MPS) for GPU-accelerated OCR. This is enabled by default via the `disable_table_extraction` setting.
 
-To use a different model:
+Marker's TableRec model is incompatible with MPS, so table extraction is disabled by default. When disabled, Marker auto-detects MPS and uses it for all other processing — typically a **2-3x speedup** over CPU.
+
+To re-enable table extraction (forces CPU on Mac):
 ```bash
-# Environment variable
-PDF_TRANSCRIBER_OLLAMA_MODEL=qwen3-vl:4b
-
-# Or pull and use
-ollama pull qwen3-vl:4b
+export PDF_TRANSCRIBER_DISABLE_TABLE_EXTRACTION=false
 ```
 
-### Without LLM Enhancement
+## Monitoring & Telemetry
 
-If you don't want to run a local LLM:
+### TUI Dashboard
+
+Monitor active transcription jobs in real time:
+
 ```bash
-pdf-transcriber-cli transcribe paper.pdf --no-llm
+# Dedicated command
+pdf-transcriber-tui
+
+# Or via CLI subcommand
+pdf-transcriber-cli tui
+
+# Monitor a specific output directory
+pdf-transcriber-tui -o ~/Documents/transcriptions
+
+# Custom refresh interval (seconds)
+pdf-transcriber-tui --refresh 3
 ```
 
-This uses Marker OCR alone, which is still excellent for clean, typed PDFs.
+The dashboard shows:
+- Active jobs with progress bars and ETA
+- Velocity (pages/hour) and elapsed time
+- CPU and memory usage from heartbeat events
+- Stale job detection (default: 120s without heartbeat)
+
+**Keyboard shortcuts**: `j/k` navigate, `Enter` details, `r` refresh, `q` quit
+
+### Telemetry Event Log
+
+Each transcription job writes structured events to `events.jsonl`:
+
+| Event | When | Data |
+|-------|------|------|
+| `job_started` | Job begins | PDF path, total pages, quality preset |
+| `page_completed` | Each page done | Duration, hallucination detected, fallback used |
+| `heartbeat` | Every 30s | CPU%, memory MB, pages since last heartbeat |
+| `error` | On problems | Severity, error type, page number |
+| `job_completed` | Job finishes | Pages completed/failed, velocity, duration |
+
+Events are stored in `~/.cache/pdf-transcriber/telemetry/` with symlinks in each output directory. The event log is also used for **resume-on-failure** — if a job is interrupted, it replays the log to find the last completed page.
+
+### Cleanup
+
+Remove telemetry logs for completed jobs:
+
+```bash
+# Preview what would be deleted
+pdf-transcriber-cleanup --dry-run
+
+# Delete completed job logs
+pdf-transcriber-cleanup
+
+# Verbose output showing reasoning for each file
+pdf-transcriber-cleanup --verbose
+```
+
+Safety: only deletes logs where both a `job_completed` event exists AND the final `.md` output file exists. Never deletes logs for active or incomplete jobs.
+
+## Page Verification & Fallback
+
+During transcription, each page is verified for common OCR failure modes:
+
+| Check | Detects | Action |
+|-------|---------|--------|
+| Single-char repetition | `g g g g g g g g` | PyMuPDF fallback |
+| Multi-word repetition | `f in f in f in f in...` | PyMuPDF fallback |
+| Garbled text | >50% non-ASCII characters | PyMuPDF fallback |
+| Page merge comment | `<!-- Content merged -->` | Warning (informational) |
+
+When a hallucination is detected, the page is automatically re-extracted using PyMuPDF's text extraction as a fallback. The fallback produces plain text (less formatting than Marker) but is reliable. Verification results are recorded in the telemetry event log.
 
 ## Configuration
 
@@ -160,18 +244,26 @@ All settings can be configured via environment variables:
 | `PDF_TRANSCRIBER_QUALITY` | fast, balanced, high-quality | `balanced` |
 | `PDF_TRANSCRIBER_USE_GPU` | Enable GPU acceleration | Auto-detected |
 | `PDF_TRANSCRIBER_USE_LLM` | Enable LLM-enhanced OCR | `true` |
+| `PDF_TRANSCRIBER_LLM_SERVICE` | LLM service class | `marker.services.openai.OpenAIService` |
+| `PDF_TRANSCRIBER_OPENAI_BASE_URL` | OpenAI-compatible server URL | `http://localhost:8080` |
+| `PDF_TRANSCRIBER_OPENAI_API_KEY` | API key (local servers: `not-needed`) | `not-needed` |
+| `PDF_TRANSCRIBER_OPENAI_MODEL` | Model name for OpenAI-compatible server | `mlx-community/Qwen2.5-VL-3B-Instruct-4bit` |
 | `PDF_TRANSCRIBER_OLLAMA_URL` | Ollama server URL | `http://localhost:11434` |
-| `PDF_TRANSCRIBER_OLLAMA_MODEL` | Vision model for OCR | `qwen2.5vl:3b` |
-| `PDF_TRANSCRIBER_CHUNK_SIZE` | Pages per chunk (large PDFs) | `25` |
-| `PDF_TRANSCRIBER_AUTO_CHUNK_THRESHOLD` | Auto-chunk above this page count | `100` |
+| `PDF_TRANSCRIBER_OLLAMA_MODEL` | Ollama vision model | `qwen2.5vl:3b` |
+| `PDF_TRANSCRIBER_CHUNK_SIZE` | Pages per chunk | `1` |
+| `PDF_TRANSCRIBER_DISABLE_TABLE_EXTRACTION` | Disable table extraction (enables MPS on Mac) | `true` |
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `transcribe <pdf>` | Transcribe a PDF to Markdown |
-| `check` | Health check (config, paths, Ollama) |
-| `install-skill` | Install Claude Code `/transcribe` skill |
+| `pdf-transcriber-cli transcribe <pdf>` | Transcribe a PDF to Markdown |
+| `pdf-transcriber-cli check` | Health check (config, paths, LLM server) |
+| `pdf-transcriber-cli install-skill` | Install Claude Code `/transcribe` skill |
+| `pdf-transcriber-cli tui` | Launch TUI monitoring dashboard |
+| `pdf-transcriber-cli cleanup` | Clean up completed job telemetry |
+| `pdf-transcriber-tui` | TUI dashboard (dedicated command) |
+| `pdf-transcriber-cleanup` | Cleanup utility (dedicated command) |
 
 ## MCP Tools
 
@@ -203,9 +295,9 @@ When running as an MCP server, these tools are available:
 
 | Preset | DPI | Resolution | Use Case |
 |--------|-----|------------|----------|
-| `fast` | 100 | ~1275×1650px | Quick previews, simple documents |
-| `balanced` | 150 | ~1913×2475px | **Default** - best quality/speed |
-| `high-quality` | 200 | ~2550×3300px | Complex math, small text |
+| `fast` | 100 | ~1275x1650px | Quick previews, simple documents |
+| `balanced` | 150 | ~1913x2475px | **Default** - best quality/speed |
+| `high-quality` | 200 | ~2550x3300px | Complex math, small text |
 
 ## Linting
 
@@ -221,6 +313,8 @@ Transcriptions are automatically linted after transcription to fix common OCR ar
 | `trailing_whitespace` | ✅ | Removes spaces/tabs at end of lines |
 | `leading_whitespace` | ✅ | Fixes inconsistent leading whitespace |
 | `header_whitespace` | ✅ | Normalizes spacing around headers |
+| `unwrapped_sentences` | ✅ | Joins orphaned sentence fragments |
+| `excessive_horizontal_rules` | ✅ | Removes redundant `---` dividers |
 | `sparse_table_row` | ⚠️ | Warns about table rows >50% empty cells |
 | `orphaned_list_marker` | ⚠️ | Warns about list markers with no content |
 
@@ -232,12 +326,19 @@ Transcriptions are automatically linted after transcription to fix common OCR ar
 | `page_marker` | ✅ | Removes page break markers |
 | `orphaned_label` | ✅ | Removes orphaned LaTeX labels like `def:Tilt` |
 | `hyphenation_artifact` | ✅ | Rejoins words split across lines (`hy-\nphenated`) |
-| `html_artifacts` | ✅ | Converts HTML tags to markdown equivalents |
-| `html_math_notation` | ✅ | Converts `<sup>2</sup>` to `$^2$` in math context |
-| `footnote_spacing` | ✅ | Fixes spacing around footnote markers |
-| `malformed_footnote` | ⚠️ | Warns about malformed footnote references |
+| `merged_content_comment` | ✅ | Removes Marker page-merge comments |
 | `garbled_text` | ⚠️ | Warns about corrupted/nonsense text fragments |
 | `repeated_line` | ⚠️ | Warns about likely running headers/footers |
+
+#### HTML & Conversion Rules
+
+| Rule | Auto-Fix | Description |
+|------|----------|-------------|
+| `html_artifacts` | ✅ | Removes HTML tags, entities, and stray closing tags |
+| `html_math_notation` | ✅ | Converts `<sup>2</sup>` to `$^{2}$` in math context |
+| `html_subscript_in_math` | ✅ | Fixes `$K$<sub>v</sub>` → `$K_{v}$` |
+| `footnote_spacing` | ✅ | Adds space after footnote markers |
+| `malformed_footnote` | ⚠️ | Warns about malformed footnote references |
 
 #### Math Notation Rules
 
@@ -246,6 +347,11 @@ Transcriptions are automatically linted after transcription to fix common OCR ar
 | `unicode_math_symbols` | ✅ | Converts Unicode math (α, →, ∈) to LaTeX (`\alpha`, `\to`, `\in`) |
 | `unwrapped_math_expressions` | ✅ | Wraps bare math expressions in `$...$` |
 | `broken_math_delimiters` | ✅ | Fixes unbalanced `$` delimiters |
+| `broken_norm_notation` | ✅ | Fixes OCR-mangled norms (`\|$\|x\|$\|` → `$\lVert x \rVert$`) |
+| `fragmented_math_expression` | ✅ | Merges OCR-split inline math (`$x$ + $y$` → `$x + y$`) |
+| `merge_math_expressions` | ✅ | Merges adjacent math expressions separated by operators |
+| `bold_number_sets` | ✅ | Converts bold to blackboard bold (`**Z**` → `$\mathbb{Z}$`) |
+| `operator_subscript_correction` | ✅ | Fixes subscripts on operators (`lim_n` → `\lim_n`) |
 | `space_in_math_variable` | ✅ | Removes spaces in variable names (`x _1` → `x_1`) |
 | `display_math_whitespace` | ✅ | Normalizes whitespace around `$$...$$` blocks |
 | `repetition_hallucination` | ⚠️ | Warns about repeated sequences (OCR hallucination) |
@@ -275,6 +381,8 @@ lint_paper(path, rules=[
     "unicode_math_symbols",
     "unwrapped_math_expressions",
     "broken_math_delimiters",
+    "broken_norm_notation",
+    "fragmented_math_expression",
     "space_in_math_variable"
 ])
 ```
