@@ -1,6 +1,6 @@
 [project]
 name = "pdf-transcriber"
-version = "1.1.0"
+version = "1.1.1"
 description = "Convert math-heavy PDFs to Markdown using Marker OCR with optional LLM enhancement"
 readme = "README.md"
 license = "MIT"
@@ -29,10 +29,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp>=1.2.0,<2",
     "pymupdf>=1.24.0",
     "pyyaml>=6.0",
-    "marker-pdf>=1.10.1",
+    "marker-pdf>=1.10.1,<2",
     "psutil>=5.9",
     "rich>=13.7",
 ]

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-09-30
+
+### Fixed
+- **Cap `marker-pdf` below 2.0.** Marker 2.0 (released 2026-07-20) runs Surya's layout/OCR model in an external llama.cpp or vLLM inference server and removes `marker.processors.order`, which the default table-free processor list names. Fresh installs of 1.1.0 resolved Marker 2.0 and failed during conversion.
+- **Cap `mcp` below 2.0** until the MCP server is tested against the 2.x SDK.
+- `pdf-transcriber-cli --version` reported 1.0.0.
+
+### Added
+- Regression tests for the supported Marker major version and the custom processor list.
+
 ## [1.1.0] - 2026-02-16
 
 ### Added
